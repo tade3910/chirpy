@@ -9,13 +9,20 @@ import (
 
 type Database struct {
 	Chirps map[int]Chirp
-	Users  map[int]User
+	Users  map[string]User
 }
 
 type User struct {
+	Id       int
+	Email    string
+	Password []byte
+}
+
+type PlainUser struct {
 	Id    int
 	Email string
 }
+
 type Chirp struct {
 	Id   int
 	Body string
@@ -28,7 +35,31 @@ type Db struct {
 	nextUserId int
 }
 
-func (database *Db) getDatabase() (*Database, bool) {
+func (database *Db) GetNextId() int {
+	database.mu.Lock()
+	defer database.mu.Unlock()
+	return database.nextId
+}
+
+func (database *Db) GetNextUserId() int {
+	database.mu.Lock()
+	defer database.mu.Unlock()
+	return database.nextUserId
+}
+
+func (database *Db) addId() {
+	database.mu.Lock()
+	defer database.mu.Unlock()
+	database.nextId++
+}
+
+func (database *Db) addUserId() {
+	database.mu.Lock()
+	defer database.mu.Unlock()
+	database.nextUserId++
+}
+
+func (database *Db) GetDatabase() (*Database, bool) {
 	database.mu.Lock()
 	defer database.mu.Unlock()
 	fileContent, err := os.ReadFile(database.path)
@@ -38,7 +69,7 @@ func (database *Db) getDatabase() (*Database, bool) {
 	}
 	currentDatabase := &Database{
 		Chirps: map[int]Chirp{},
-		Users:  map[int]User{},
+		Users:  map[string]User{},
 	}
 	if len(fileContent) == 0 {
 		return currentDatabase, true
@@ -51,79 +82,22 @@ func (database *Db) getDatabase() (*Database, bool) {
 	return currentDatabase, true
 }
 
-func (databse *Db) GetOne(chripId int) (Chirp, bool) {
-	readDatabase, success := databse.getDatabase()
-	if !success {
-		return Chirp{}, false
+func (db *Db) UpdateDatabase(database *Database, update string) bool {
+	ok := db.writeToJson(database)
+	if ok {
+		switch update {
+		case "chirp":
+			db.addId()
+		case "user":
+			db.addUserId()
+		default:
+			return false
+		}
 	}
-	chirp, ok := readDatabase.Chirps[chripId]
-	if !ok {
-		return Chirp{}, false
-	}
-	return chirp, true
+	return ok
 }
 
-func (db *Db) GetFormatedDatabase() ([]Chirp, bool) {
-	database, success := db.getDatabase()
-	if !success {
-		return nil, false
-	}
-	formatedDatabse := make([]Chirp, len(database.Chirps))
-	for key, chirp := range database.Chirps {
-		formatedDatabse[key] = chirp
-	}
-	return formatedDatabse, true
-}
-
-func (db *Db) UpdateChirps(data string) (Chirp, bool) {
-	database, success := db.getDatabase()
-	if !success {
-		fmt.Println("Problem getting database")
-		return Chirp{}, false
-	}
-	db.mu.Lock()
-	nextChirp := Chirp{
-		Id:   db.nextId,
-		Body: data,
-	}
-	database.Chirps[db.nextId] = nextChirp
-	db.mu.Unlock()
-	success = db.updateDatabase(database)
-	if !success {
-		fmt.Println("Problem getting database")
-		return Chirp{}, false
-	}
-	db.mu.Lock()
-	db.nextId++
-	db.mu.Unlock()
-	return nextChirp, true
-}
-
-func (db *Db) UpdateUsers(email string) (User, bool) {
-	database, success := db.getDatabase()
-	if !success {
-		fmt.Println("Problem getting database")
-		return User{}, false
-	}
-	db.mu.Lock()
-	nextUser := User{
-		Id:    db.nextUserId,
-		Email: email,
-	}
-	database.Users[db.nextUserId] = nextUser
-	db.mu.Unlock()
-	success = db.updateDatabase(database)
-	if !success {
-		fmt.Println("Problem getting database")
-		return User{}, false
-	}
-	db.mu.Lock()
-	db.nextUserId++
-	db.mu.Unlock()
-	return nextUser, true
-}
-
-func (db *Db) updateDatabase(database *Database) bool {
+func (db *Db) writeToJson(database *Database) bool {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	file, err := os.OpenFile(db.path, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)

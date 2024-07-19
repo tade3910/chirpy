@@ -8,6 +8,7 @@ import (
 
 	"github.com/tade3910/chirpy/db"
 	"github.com/tade3910/chirpy/util"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type usersHandler struct {
@@ -20,18 +21,46 @@ func GetUsersHandler(db *db.Db) *usersHandler {
 	}
 }
 
+func (handler *usersHandler) updateUsers(email string, password string) (db.PlainUser, bool) {
+	database, success := handler.db.GetDatabase()
+	if !success {
+		return db.PlainUser{}, false
+	}
+	hashPassowrd, err := bcrypt.GenerateFromPassword([]byte(password), 0)
+	if err != nil {
+		return db.PlainUser{}, false
+	}
+	id := handler.db.GetNextUserId()
+	nextUser := db.User{
+		Id:       id,
+		Email:    email,
+		Password: hashPassowrd,
+	}
+	_, exists := database.Users[email]
+	if exists {
+		return db.PlainUser{}, false
+	}
+	database.Users[email] = nextUser
+	success = handler.db.UpdateDatabase(database, "chirp")
+	if !success {
+		fmt.Println("Problem getting database")
+		return db.PlainUser{}, false
+	}
+	return db.PlainUser{Id: id, Email: email}, true
+}
+
 func (handler *usersHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	fmt.Println("Posting")
-	email, ok := getEmail(r)
+	reqBody, ok := getBody(r)
 	if !ok {
 		util.RespondWithError(w, http.StatusInternalServerError, "Invalid email posted")
 		return
 	}
-	response, ok := handler.db.UpdateUsers(email)
+	response, ok := handler.updateUsers(reqBody.Email, reqBody.Password)
 	if !ok {
 		util.RespondWithError(w, http.StatusInternalServerError, "Couldn't update database")
 		return
@@ -39,21 +68,23 @@ func (handler *usersHandler) handlePost(w http.ResponseWriter, r *http.Request) 
 	util.RespondWithJSON(w, 200, response)
 }
 
-func getEmail(r *http.Request) (string, bool) {
-	type respBody struct {
-		Email string
-	}
-	bodyStruct := &respBody{}
+type reqBody struct {
+	Password string
+	Email    string
+}
+
+func getBody(r *http.Request) (reqBody, bool) {
+	bodyStruct := &reqBody{}
 	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
-		return "", false
+		return reqBody{}, false
 	}
 	err = json.Unmarshal(body, bodyStruct)
 	if err != nil {
-		return "", false
+		return reqBody{}, false
 	}
-	return bodyStruct.Email, true
+	return *bodyStruct, true
 }
 
 func (handler *usersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

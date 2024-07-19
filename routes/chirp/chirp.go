@@ -1,9 +1,8 @@
 package chirp
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/tade3910/chirpy/db"
@@ -20,67 +19,47 @@ func GetChirpHandler(db *db.Db) *chirpHandler {
 	}
 }
 
-func (handler *chirpHandler) handlePost(w http.ResponseWriter, r *http.Request) {
-	chrip, ok := handleChirp(r)
-	if !ok {
-		util.RespondWithError(w, http.StatusInternalServerError, "Invalid chirp posted")
-		return
+func (handler *chirpHandler) getChirp(chripId int) (db.Chirp, bool) {
+	readDatabase, success := handler.db.GetDatabase()
+	if !success {
+		return db.Chirp{}, false
 	}
-	response, ok := handler.db.UpdateChirps(chrip)
+	chirp, ok := readDatabase.Chirps[chripId]
 	if !ok {
-		util.RespondWithError(w, http.StatusInternalServerError, "Couldn't update database")
-		return
+		return db.Chirp{}, false
 	}
-	util.RespondWithJSON(w, 200, response)
+	return chirp, true
 }
 
-func cleanBody(s string) string {
-	s = strings.ToLower(s)
-	words := strings.Split(s, " ")
-	for index, word := range words {
-		if word == "kerfuffle" || word == "sharbert" || word == "fornax" {
-			words[index] = "****"
-		}
+func (handler *chirpHandler) handleGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	return strings.Join(words, " ")
-}
-
-func handleChirp(r *http.Request) (string, bool) {
-	type respBody struct {
-		Body string
+	url := r.URL.Path
+	urlSplit := strings.Split(url, "/")
+	if len(url) < 4 {
+		util.RespondWithError(w, http.StatusInternalServerError, "Invalid params")
+		return
 	}
-	bodyStruct := &respBody{}
-	body, err := io.ReadAll(r.Body)
-	r.Body.Close()
+	id := urlSplit[3]
+	intId, err := strconv.Atoi(id)
 	if err != nil {
-		return "", false
-	}
-	err = json.Unmarshal(body, bodyStruct)
-	if err != nil {
-		return "", false
-	}
-	if len(bodyStruct.Body) > 140 {
-		return "", false
-	} else {
-		return cleanBody(bodyStruct.Body), true
-	}
-}
-
-func (handler *chirpHandler) handleGet(w http.ResponseWriter) {
-	chirps, ok := handler.db.GetFormatedDatabase()
-	if !ok {
-		util.RespondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		util.RespondWithError(w, http.StatusInternalServerError, "Invalid params")
 		return
 	}
-	util.RespondWithJSON(w, 200, chirps)
+	chirp, ok := handler.getChirp(intId)
+	if !ok {
+		util.RespondWithError(w, http.StatusInternalServerError, "Could not get id")
+		return
+	}
+	util.RespondWithJSON(w, 200, chirp)
 }
 
 func (handler *chirpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		handler.handleGet(w)
-	case http.MethodPost:
-		handler.handlePost(w, r)
+		handler.handleGet(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
