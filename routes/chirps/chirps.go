@@ -1,9 +1,7 @@
 package chirps
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -50,14 +48,8 @@ func handleChirp(r *http.Request) (string, bool) {
 	type respBody struct {
 		Body string
 	}
-	bodyStruct := &respBody{}
-	body, err := io.ReadAll(r.Body)
-	r.Body.Close()
-	if err != nil {
-		return "", false
-	}
-	err = json.Unmarshal(body, bodyStruct)
-	if err != nil {
+	bodyStruct, ok := util.GetBody(r, &respBody{})
+	if !ok {
 		return "", false
 	}
 	if len(bodyStruct.Body) > 140 {
@@ -111,7 +103,7 @@ func (handler *chirpsHandler) updateChirps(data string) (db.Chirp, bool) {
 		Body: data,
 	}
 	database.Chirps[id] = nextChirp
-	success = handler.db.UpdateDatabase(database, "user")
+	success = handler.db.UpdateDatabase(database, db.ChirpDatabase)
 	if !success {
 		fmt.Println("Problem getting database")
 		return db.Chirp{}, false

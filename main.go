@@ -45,8 +45,8 @@ func main() {
 	}
 	router.Handle("/api/chirps", chirps.GetChirpsHandler(db))
 	router.Handle("/api/chirps/", chirp.GetChirpHandler(db))
-	router.Handle("/api/users", users.GetUsersHandler(db))
-	router.Handle("/api/login", login.GetLoginHandler(db, apiCfg.JwtSecret))
+	router.Handle("/api/users", apiCfg.EnsureValidated(users.GetUsersHandler(db)))
+	router.Handle("/api/login", apiCfg.WithJwtSecret(login.GetLoginHandler(db)))
 	router.HandleFunc("/admin/metrics", apiCfg.HandleMetrics)
 	router.HandleFunc("/api/reset", apiCfg.HandleReset)
 	server := &http.Server{

@@ -8,8 +8,9 @@ import (
 )
 
 type Database struct {
-	Chirps map[int]Chirp
-	Users  map[string]User
+	Chirps     map[int]Chirp
+	Users      map[string]User
+	IDUsersMap map[int]User
 }
 
 type User struct {
@@ -68,8 +69,9 @@ func (database *Db) GetDatabase() (*Database, bool) {
 		return nil, false
 	}
 	currentDatabase := &Database{
-		Chirps: map[int]Chirp{},
-		Users:  map[string]User{},
+		Chirps:     map[int]Chirp{},
+		Users:      map[string]User{},
+		IDUsersMap: map[int]User{},
 	}
 	if len(fileContent) == 0 {
 		return currentDatabase, true
@@ -82,14 +84,24 @@ func (database *Db) GetDatabase() (*Database, bool) {
 	return currentDatabase, true
 }
 
-func (db *Db) UpdateDatabase(database *Database, update string) bool {
+type databaseName string
+
+const (
+	ChirpDatabase databaseName = "chirp"
+	UserDatabase  databaseName = "user"
+	NoDatabase    databaseName = ""
+)
+
+func (db *Db) UpdateDatabase(database *Database, update databaseName) bool {
 	ok := db.writeToJson(database)
 	if ok {
 		switch update {
-		case "chirp":
+		case ChirpDatabase:
 			db.addId()
-		case "user":
+		case UserDatabase:
 			db.addUserId()
+		case NoDatabase:
+			break
 		default:
 			return false
 		}

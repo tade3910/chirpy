@@ -1,12 +1,12 @@
 package users
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/tade3910/chirpy/db"
+	"github.com/tade3910/chirpy/middleware/apiConfig"
 	"github.com/tade3910/chirpy/util"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -21,7 +21,7 @@ func GetUsersHandler(db *db.Db) *usersHandler {
 	}
 }
 
-func (handler *usersHandler) updateUsers(email string, password string) (db.PlainUser, bool) {
+func (handler *usersHandler) addUser(email string, password string) (db.PlainUser, bool) {
 	database, success := handler.db.GetDatabase()
 	if !success {
 		return db.PlainUser{}, false
@@ -41,7 +41,8 @@ func (handler *usersHandler) updateUsers(email string, password string) (db.Plai
 		return db.PlainUser{}, false
 	}
 	database.Users[email] = nextUser
-	success = handler.db.UpdateDatabase(database, "chirp")
+	database.IDUsersMap[id] = nextUser
+	success = handler.db.UpdateDatabase(database, db.UserDatabase)
 	if !success {
 		fmt.Println("Problem getting database")
 		return db.PlainUser{}, false
@@ -55,12 +56,12 @@ func (handler *usersHandler) handlePost(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	fmt.Println("Posting")
-	reqBody, ok := getBody(r)
+	authStruct, ok := util.GetBody(r, &authStruct{})
 	if !ok {
 		util.RespondWithError(w, http.StatusInternalServerError, "Invalid email posted")
 		return
 	}
-	response, ok := handler.updateUsers(reqBody.Email, reqBody.Password)
+	response, ok := handler.addUser(authStruct.Email, authStruct.Password)
 	if !ok {
 		util.RespondWithError(w, http.StatusInternalServerError, "Couldn't update database")
 		return
@@ -68,29 +69,69 @@ func (handler *usersHandler) handlePost(w http.ResponseWriter, r *http.Request) 
 	util.RespondWithJSON(w, 200, response)
 }
 
-type reqBody struct {
+type authStruct struct {
 	Password string
 	Email    string
 }
 
-func getBody(r *http.Request) (reqBody, bool) {
-	bodyStruct := &reqBody{}
-	body, err := io.ReadAll(r.Body)
-	r.Body.Close()
-	if err != nil {
-		return reqBody{}, false
+func (handler *usersHandler) updateUser(userId int, email string, password string) (db.PlainUser, bool) {
+	database, success := handler.db.GetDatabase()
+	if !success {
+		return db.PlainUser{}, false
 	}
-	err = json.Unmarshal(body, bodyStruct)
-	if err != nil {
-		return reqBody{}, false
+	user, exists := database.IDUsersMap[userId]
+	if !exists {
+		return db.PlainUser{}, false
 	}
-	return *bodyStruct, true
+	hashPassowrd, err := bcrypt.GenerateFromPassword([]byte(password), 0)
+	if err != nil {
+		return db.PlainUser{}, false
+	}
+	delete(database.Users, user.Email)
+	user.Email = email
+	user.Password = hashPassowrd
+	database.IDUsersMap[userId] = user
+	database.Users[user.Email] = user
+	success = handler.db.UpdateDatabase(database, db.NoDatabase)
+	if !success {
+		fmt.Println("Problem getting database")
+		return db.PlainUser{}, false
+	}
+	return db.PlainUser{Id: userId, Email: email}, true
+}
+
+func (handler *usersHandler) handlePut(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Entering put")
+	userIdString, ok := r.Context().Value(apiConfig.UserId).(string)
+	if !ok {
+		util.RespondWithError(w, 500, "I didn't pass in the user Id correctly")
+		return
+	}
+	authDetails, ok := util.GetBody(r, &authStruct{})
+	fmt.Println("Gotten body")
+	if !ok {
+		util.RespondWithError(w, 500, "Error parsing req body")
+		return
+	}
+	userId, err := strconv.Atoi(userIdString)
+	if err != nil {
+		util.RespondWithError(w, 500, err.Error())
+		return
+	}
+	response, ok := handler.updateUser(userId, authDetails.Email, authDetails.Password)
+	if !ok {
+		util.RespondWithError(w, 500, "Error Updating user")
+		return
+	}
+	util.RespondWithJSON(w, 200, response)
 }
 
 func (handler *usersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		handler.handlePost(w, r)
+	case http.MethodPut:
+		handler.handlePut(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
