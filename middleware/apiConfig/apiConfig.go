@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -21,12 +20,14 @@ const (
 type apiConfig struct {
 	fileserverHits int
 	jwtSecret      string
+	polkaKey       string
 	mu             sync.Mutex
 }
 
-func GetApiConfig(JwtSecret string) *apiConfig {
+func GetApiConfig(JwtSecret string, polkaKey string) *apiConfig {
 	return &apiConfig{
 		jwtSecret: JwtSecret,
+		polkaKey:  polkaKey,
 	}
 }
 
@@ -41,24 +42,18 @@ func excludeRoutes(r *http.Request) bool {
 	return r.URL.Path == "/api/users" && r.Method == http.MethodPost
 }
 
-func (cfg *apiConfig) EnsureValidated(next http.Handler) http.Handler {
+func (cfg *apiConfig) EnsureAuthenticated(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// If a new user is created they don't have token
 		if excludeRoutes(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		bearerToken := r.Header.Get("Authorization")
-		if bearerToken == "" {
-			util.RespondWithError(w, 401, "No Authorization token provided")
+		tokenString, err := util.GetAuthToken(r, util.Bearer)
+		if err != nil {
+			util.RespondWithError(w, 401, err.Error())
 			return
 		}
-		split := strings.Split(bearerToken, " ")
-		if len(split) != 2 || split[0] != "Bearer" {
-			util.RespondWithError(w, 401, "Malformated Authorization token provided")
-			return
-		}
-		tokenString := split[1]
 		token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
 			return []byte(cfg.jwtSecret), nil
 		})
@@ -83,6 +78,17 @@ func (cfg *apiConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
 		cfg.mu.Lock()
 		cfg.fileserverHits++
 		cfg.mu.Unlock()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (cfg *apiConfig) CheckPolkaKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenString, err := util.GetAuthToken(r, util.ApiKey)
+		if err != nil || tokenString != cfg.polkaKey {
+			util.RespondWithError(w, 401, err.Error())
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

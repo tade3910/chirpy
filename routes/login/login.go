@@ -1,11 +1,9 @@
 package login
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/tade3910/chirpy/db"
 	"github.com/tade3910/chirpy/middleware/apiConfig"
 	"github.com/tade3910/chirpy/util"
@@ -23,23 +21,8 @@ func GetLoginHandler(db *db.Db) *loginHandler {
 }
 
 type reqBody struct {
-	Password           string
-	Email              string
-	Expires_in_seconds *int
-}
-
-func createToken(expiry_time time.Duration, user_id int, jwtSecret string) (string, error) {
-
-	// Create claims with multiple fields populated
-	claims := jwt.RegisteredClaims{
-		// A usual scenario is to set the expiration time relative to the current time
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry_time)),
-		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-		Issuer:    "chirpy",
-		Subject:   fmt.Sprintf("%d", user_id),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(jwtSecret))
+	Password string
+	Email    string
 }
 
 func (handler *loginHandler) handlePost(w http.ResponseWriter, r *http.Request) {
@@ -64,16 +47,34 @@ func (handler *loginHandler) handlePost(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if bcrypt.CompareHashAndPassword(user.Password, []byte(body.Password)) == nil {
-		expiry_time := 24 * time.Hour
-		if body.Expires_in_seconds != nil {
-			expiry_time = time.Duration(*body.Expires_in_seconds) * time.Second
-		}
-		token, err := createToken(expiry_time, user.Id, jwtSecret)
+		expiry_time := 1 * time.Hour
+		token, err := util.CreateAcessToken(expiry_time, user.Id, jwtSecret)
 		if err != nil {
 			util.RespondWithError(w, http.StatusInternalServerError, "Could not create token")
 			return
 		}
-		util.RespondWithJSON(w, 200, map[string]string{"Email": user.Email, "Id": fmt.Sprintf("%d", user.Id), "token": token})
+		refreshToken, err := util.CreateRefreshToken()
+		session := db.GetNewSession(user)
+		if err != nil {
+			util.RespondWithError(w, http.StatusInternalServerError, "Could not create refresh token")
+			return
+		}
+		database.Sessions[refreshToken] = session
+		handler.db.UpdateDatabase(database, db.NoDatabase)
+		responseBody := struct {
+			Token        string
+			RefreshToken string
+			db.PlainUser
+		}{
+			Token:        token,
+			RefreshToken: refreshToken,
+			PlainUser: db.PlainUser{
+				Email:         user.Email,
+				Id:            user.Id,
+				Is_chirpy_red: user.Is_chirpy_red,
+			},
+		}
+		util.RespondWithJSON(w, 200, responseBody)
 	} else {
 		util.RespondWithError(w, http.StatusInternalServerError, "Invalid password")
 	}

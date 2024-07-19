@@ -31,10 +31,12 @@ func (handler *usersHandler) addUser(email string, password string) (db.PlainUse
 		return db.PlainUser{}, false
 	}
 	id := handler.db.GetNextUserId()
-	nextUser := db.User{
-		Id:       id,
-		Email:    email,
+	nextUser := &db.User{
 		Password: hashPassowrd,
+		PlainUser: db.PlainUser{
+			Id:    id,
+			Email: email,
+		},
 	}
 	_, exists := database.Users[email]
 	if exists {
@@ -55,7 +57,6 @@ func (handler *usersHandler) handlePost(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	fmt.Println("Posting")
 	authStruct, ok := util.GetBody(r, &authStruct{})
 	if !ok {
 		util.RespondWithError(w, http.StatusInternalServerError, "Invalid email posted")
@@ -101,14 +102,12 @@ func (handler *usersHandler) updateUser(userId int, email string, password strin
 }
 
 func (handler *usersHandler) handlePut(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Entering put")
 	userIdString, ok := r.Context().Value(apiConfig.UserId).(string)
 	if !ok {
 		util.RespondWithError(w, 500, "I didn't pass in the user Id correctly")
 		return
 	}
 	authDetails, ok := util.GetBody(r, &authStruct{})
-	fmt.Println("Gotten body")
 	if !ok {
 		util.RespondWithError(w, 500, "Error parsing req body")
 		return

@@ -3,9 +3,11 @@ package chirps
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/tade3910/chirpy/db"
+	"github.com/tade3910/chirpy/middleware/apiConfig"
 	"github.com/tade3910/chirpy/util"
 )
 
@@ -20,12 +22,21 @@ func GetChirpsHandler(db *db.Db) *chirpsHandler {
 }
 
 func (handler *chirpsHandler) handlePost(w http.ResponseWriter, r *http.Request) {
+	authorIdString, ok := r.Context().Value(apiConfig.UserId).(string)
+	if !ok {
+		util.RespondWithError(w, http.StatusInternalServerError, "I messed up passing the id")
+		return
+	}
+	authorId, err := strconv.Atoi(authorIdString)
+	if err != nil {
+		util.RespondWithError(w, http.StatusInternalServerError, "error converting id to int")
+	}
 	chrip, ok := handleChirp(r)
 	if !ok {
 		util.RespondWithError(w, http.StatusInternalServerError, "Invalid chirp posted")
 		return
 	}
-	response, ok := handler.updateChirps(chrip)
+	response, ok := handler.updateChirps(chrip, authorId)
 	if !ok {
 		util.RespondWithError(w, http.StatusInternalServerError, "Couldn't update database")
 		return
@@ -91,7 +102,7 @@ func (handler *chirpsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (handler *chirpsHandler) updateChirps(data string) (db.Chirp, bool) {
+func (handler *chirpsHandler) updateChirps(data string, authorId int) (db.Chirp, bool) {
 	database, success := handler.db.GetDatabase()
 	if !success {
 		fmt.Println("Problem getting database")
@@ -99,8 +110,9 @@ func (handler *chirpsHandler) updateChirps(data string) (db.Chirp, bool) {
 	}
 	id := handler.db.GetNextId()
 	nextChirp := db.Chirp{
-		Id:   id,
-		Body: data,
+		Id:       id,
+		Body:     data,
+		AuthorId: authorId,
 	}
 	database.Chirps[id] = nextChirp
 	success = handler.db.UpdateDatabase(database, db.ChirpDatabase)

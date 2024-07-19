@@ -5,28 +5,36 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 )
 
 type Database struct {
 	Chirps     map[int]Chirp
-	Users      map[string]User
-	IDUsersMap map[int]User
+	Users      map[string]*User
+	IDUsersMap map[int]*User
+	Sessions   map[string]Session
+}
+
+type Session struct {
+	User    *User
+	Expires time.Time
 }
 
 type User struct {
-	Id       int
-	Email    string
 	Password []byte
+	PlainUser
 }
 
 type PlainUser struct {
-	Id    int
-	Email string
+	Id            int
+	Email         string
+	Is_chirpy_red bool
 }
 
 type Chirp struct {
-	Id   int
-	Body string
+	Id       int
+	Body     string
+	AuthorId int
 }
 
 type Db struct {
@@ -34,6 +42,13 @@ type Db struct {
 	path       string
 	nextId     int
 	nextUserId int
+}
+
+func GetNewSession(user *User) Session {
+	return Session{
+		User:    user,
+		Expires: time.Now().UTC().Add(time.Duration(60*24) * time.Hour),
+	}
 }
 
 func (database *Db) GetNextId() int {
@@ -60,6 +75,7 @@ func (database *Db) addUserId() {
 	database.nextUserId++
 }
 
+// Returns current database, handles empty json
 func (database *Db) GetDatabase() (*Database, bool) {
 	database.mu.Lock()
 	defer database.mu.Unlock()
@@ -70,8 +86,9 @@ func (database *Db) GetDatabase() (*Database, bool) {
 	}
 	currentDatabase := &Database{
 		Chirps:     map[int]Chirp{},
-		Users:      map[string]User{},
-		IDUsersMap: map[int]User{},
+		Users:      map[string]*User{},
+		IDUsersMap: map[int]*User{},
+		Sessions:   map[string]Session{},
 	}
 	if len(fileContent) == 0 {
 		return currentDatabase, true
